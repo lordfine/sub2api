@@ -2219,7 +2219,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	}
 
 	now := time.Now()
-	until := now.Add(time.Duration(rule.DurationMinutes) * time.Minute)
+	until := computeTempUnschedUntil(now, rule.DurationMinutes, responseBody)
 
 	state := &TempUnschedState{
 		UntilUnix:       until.Unix(),
@@ -2400,4 +2400,36 @@ func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, accoun
 
 	slog.Warn("stream_timeout_account_error", "account_id", account.ID, "model", model)
 	return true
+}
+
+// resetTimeRegex 匹配智谱等上游"YYYY-MM-DD HH:MM:SS 后可继续使用"解限时间（北京时间）。
+var resetTimeRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*后可继续使用`)
+
+// computeTempUnschedUntil 计算临时不可调度结束时间。
+// 优先从响应体解析精确解限时间，解析不到回退 now + durationMinutes。
+func computeTempUnschedUntil(now time.Time, durationMinutes int, responseBody []byte) time.Time {
+	if t := parseResetTimeFromBody(responseBody); !t.IsZero() && t.After(now) {
+		return t
+	}
+	return now.Add(time.Duration(durationMinutes) * time.Minute)
+}
+
+// parseResetTimeFromBody 解析"YYYY-MM-DD HH:MM:SS 后可继续使用"（北京时间）。
+func parseResetTimeFromBody(body []byte) time.Time {
+	if len(body) == 0 {
+		return time.Time{}
+	}
+	m := resetTimeRegex.FindSubmatch(body)
+	if len(m) < 2 {
+		return time.Time{}
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*3600)
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", string(m[1]), loc)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
