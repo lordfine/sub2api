@@ -33,7 +33,6 @@ import (
 const (
 	claudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	claudeAPICountTokensURL = "https://api.anthropic.com/v1/messages/count_tokens?beta=true"
-	stickySessionTTL        = time.Hour // 粘性会话TTL
 	defaultMaxLineSize      = 500 * 1024 * 1024
 	// Canonical Claude Code banner. Keep it EXACT (no trailing whitespace/newlines)
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
@@ -1561,4 +1560,16 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 
 	// 写入文件（调试用，并发写入可能交错但不影响可读性）
 	_, _ = f.WriteString(buf.String())
+}
+
+// stickySessionTTL 粘性会话TTL，可通过环境变量 STICKY_SESSION_TTL_MINUTES 覆盖（分钟，默认 60）。
+var stickySessionTTL = loadStickySessionTTL()
+
+func loadStickySessionTTL() time.Duration {
+	if v := os.Getenv("STICKY_SESSION_TTL_MINUTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Minute
+		}
+	}
+	return time.Hour
 }
