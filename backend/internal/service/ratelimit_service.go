@@ -2403,7 +2403,7 @@ func (s *RateLimitService) triggerStreamTimeoutError(ctx context.Context, accoun
 }
 
 // resetTimeRegex 匹配智谱等上游"YYYY-MM-DD HH:MM:SS 后可继续使用"解限时间（北京时间）。
-var resetTimeRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*后可继续使用`)
+var resetTimeRegex = regexp.MustCompile(`(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s*(?:后可继续使用|重置)`)
 
 // computeTempUnschedUntil 计算临时不可调度结束时间。
 // 优先从响应体解析精确解限时间，解析不到回退 now + durationMinutes。
