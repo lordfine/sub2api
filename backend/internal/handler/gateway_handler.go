@@ -143,10 +143,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
-	if err == nil && len(body) > 1024*1024 {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "prompt_too_long: request body exceeds 1MB. Please run /compact to reduce conversation context.")
-		return
-	}
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -1941,10 +1937,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
-	if err == nil && len(body) > 1024*1024 {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "prompt_too_long: request body exceeds 1MB. Please run /compact to reduce conversation context.")
-		return
-	}
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
