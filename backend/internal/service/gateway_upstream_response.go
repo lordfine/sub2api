@@ -233,6 +233,11 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 		return true
 	}
 
+	// 火山云 coding 端点兼容性 400（专属文案，Anthropic 官方不会返回，不误伤）
+	if strings.Contains(msg, "error when parsing") || strings.Contains(msg, "do not support image") || strings.Contains(msg, "only support text input") {
+		return true
+	}
+
 	return false
 }
 
