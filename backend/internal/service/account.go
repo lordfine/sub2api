@@ -238,6 +238,23 @@ func (a *Account) IsOverloaded() bool {
 	return time.Now().Before(*a.OverloadUntil)
 }
 
+// SupportsImageInput 是否支持图片输入（多模态）。默认 false，Extra["supports_image_input"]=true 开启
+func (a *Account) SupportsImageInput() bool {
+	if v, ok := a.Extra["supports_image_input"].(bool); ok {
+		return v
+	}
+	return false
+}
+
+// HasImageBlock 检测请求体是否含图片 content block（Anthropic image / OpenAI image_url）
+func HasImageBlock(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	sb := string(body)
+	return strings.Contains(sb, `"type":"image"`) || strings.Contains(sb, `"type": "image"`) || strings.Contains(sb, `"type":"image_url"`) || strings.Contains(sb, `"type": "image_url"`)
+}
+
 func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
 }
