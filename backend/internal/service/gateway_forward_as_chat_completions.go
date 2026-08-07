@@ -35,15 +35,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 ) (*ForwardResult, error) {
 	startTime := time.Now()
 
-	// 图片请求 + 当前账户不支持图片 -> 触发 failover 到多模态账户
-	if account != nil && !account.SupportsImageInput() && HasImageBlock(body) {
-		return nil, &UpstreamFailoverError{
-			StatusCode:    400,
-			ResponseBody:  []byte(`{"error":{"type":"invalid_request_error","message":"current account does not support image input"}}`),
-			ClientMessage: "image input not supported by current account, failover to multimodal",
-		}
-	}
-
 	// 1. Parse Chat Completions request
 	var ccReq apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &ccReq); err != nil {

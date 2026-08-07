@@ -445,7 +445,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			// B-4: 图片请求不写 sticky，保障下一轮无图请求回 glm-5.2 主力
-			if !service.HasImageBlock(body) && (selection.ProfitGateActive() || !selection.Acquired) {
+			if selection.ProfitGateActive() || !selection.Acquired {
 				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -769,7 +769,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
 			// B-4: 图片请求不写 sticky，保障下一轮无图请求回 glm-5.2 主力
-			if !service.HasImageBlock(body) && (selection.ProfitGateActive() || !selection.Acquired) {
+			if selection.ProfitGateActive() || !selection.Acquired {
 				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1054,11 +1054,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if !service.HasImageBlock(body) {
 					if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 										reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 									}
-				}
 			}
 
 			submitForwardUsage(result)

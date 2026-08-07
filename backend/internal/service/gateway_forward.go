@@ -98,15 +98,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return s.handleWebSearchEmulation(ctx, c, account, parsed)
 	}
 
-	// 图片请求 + 当前账户不支持图片 -> 触发 failover 到多模态账户（B+方案）
-	if account != nil && !account.SupportsImageInput() && HasImageBlock(parsed.Body.Bytes()) {
-		return nil, &UpstreamFailoverError{
-			StatusCode:    400,
-			ResponseBody:  []byte(`{"error":{"type":"invalid_request_error","message":"current account does not support image input"}}`),
-			ClientMessage: "image input not supported by current account, failover to multimodal",
-		}
-	}
-
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
 		passthroughBody := parsed.Body.Bytes()
 		passthroughModel := parsed.Model
