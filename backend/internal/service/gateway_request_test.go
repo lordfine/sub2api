@@ -1639,3 +1639,59 @@ func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureBudgetWithinMaxTokens(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantApplied   bool
+		checkBudget   int64
+		checkMaxTok   int64
+	}{
+		{
+			name:        "budget < max_tokens，不修正",
+			input:       `{"thinking":{"budget_tokens":16000},"max_tokens":32000}`,
+			wantApplied: false,
+		},
+		{
+			name:        "无 thinking budget，不修正",
+			input:       `{"max_tokens":32000}`,
+			wantApplied: false,
+		},
+		{
+			name:        "无 max_tokens，不修正",
+			input:       `{"thinking":{"budget_tokens":32768}}`,
+			wantApplied: false,
+		},
+		{
+			name:        "budget=32768 > max=32000，降 budget 到 30976",
+			input:       `{"thinking":{"budget_tokens":32768},"max_tokens":32000}`,
+			wantApplied: true,
+			checkBudget: 30976,
+		},
+		{
+			name:        "budget=max_tokens 相等，降 budget",
+			input:       `{"thinking":{"budget_tokens":32000},"max_tokens":32000}`,
+			wantApplied: true,
+			checkBudget: 30976,
+		},
+		{
+			name:        "max_tokens 太小(1024)，升 max_tokens",
+			input:       `{"thinking":{"budget_tokens":32768},"max_tokens":1024}`,
+			wantApplied: true,
+			checkMaxTok: 33792,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, applied := EnsureBudgetWithinMaxTokens([]byte(tt.input))
+			require.Equal(t, tt.wantApplied, applied)
+			if tt.checkBudget > 0 {
+				require.Equal(t, tt.checkBudget, gjson.GetBytes(got, "thinking.budget_tokens").Int())
+			}
+			if tt.checkMaxTok > 0 {
+				require.Equal(t, tt.checkMaxTok, gjson.GetBytes(got, "max_tokens").Int())
+			}
+		})
+	}
+}
