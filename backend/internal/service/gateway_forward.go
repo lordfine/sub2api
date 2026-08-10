@@ -106,6 +106,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
+	// 前置修正：确保 thinking.budget_tokens < max_tokens。
+	// Claude Code 有时发出矛盾参数（budget_tokens >= max_tokens），
+	// 阿里云等上游直接返回 400。在任何转发分支之前统一修正。
+	if account != nil {
+		if rewritten, applied := EnsureBudgetWithinMaxTokens(parsed.Body.Bytes()); applied {
+			if err := parsed.ReplaceBody(rewritten); err != nil {
+				return nil, fmt.Errorf("rewrite request body: %w", err)
+			}
+			logger.LegacyPrintf("service.gateway", "Account %d: rectified thinking.budget_tokens >= max_tokens pre-forward", account.ID)
+		}
+	}
+
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
 	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
 		return s.handleWebSearchEmulation(ctx, c, account, parsed)
