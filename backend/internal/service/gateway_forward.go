@@ -360,6 +360,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
+	// 前置修正：确保 thinking.budget_tokens < max_tokens。
+	// Claude Code 有时发出矛盾参数（budget_tokens >= max_tokens），
+	// 阿里云等上游直接返回 400。转发前自动修正避免此问题。
+	if rewritten, applied := EnsureBudgetWithinMaxTokens(body); applied {
+		if err := replaceBody(rewritten); err != nil {
+			return nil, err
+		}
+		logger.LegacyPrintf("service.gateway", "Account %d: rectified thinking.budget_tokens >= max_tokens pre-forward", account.ID)
+	}
+
 	// 重试循环
 	var resp *http.Response
 	lastWireBody := body

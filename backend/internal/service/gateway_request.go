@@ -1449,6 +1449,44 @@ func RectifyThinkingBudget(body []byte) ([]byte, bool) {
 	return modified, changed
 }
 
+// EnsureBudgetWithinMaxTokens 前置修正：确保 thinking.budget_tokens < max_tokens。
+// Claude Code 有时发出矛盾参数（budget_tokens >= max_tokens，如 32768 vs 32000），
+// 部分上游（阿里云 qwen）会直接返回 400。转发前自动修正，避免依赖后置整流器的错误模式匹配。
+//
+// 修正策略：
+//   - max_tokens 充足时：降 budget_tokens = max_tokens - 1024（至少留 1024 给输出）
+//   - max_tokens 太小时：升 max_tokens = budget_tokens + 1024
+func EnsureBudgetWithinMaxTokens(body []byte) ([]byte, bool) {
+	budgetTokens := gjson.GetBytes(body, "thinking.budget_tokens").Int()
+	if budgetTokens <= 0 {
+		return body, false
+	}
+	maxTokens := gjson.GetBytes(body, "max_tokens").Int()
+	if maxTokens <= 0 {
+		return body, false
+	}
+	if budgetTokens < maxTokens {
+		return body, false
+	}
+
+	const outputReserve = 1024 // 至少留 1024 tokens 给实际输出
+
+	if maxTokens > outputReserve+1024 {
+		// 方案 A：降 budget_tokens
+		newBudget := maxTokens - outputReserve
+		if result, err := sjson.SetBytes(body, "thinking.budget_tokens", newBudget); err == nil {
+			return result, true
+		}
+	} else {
+		// max_tokens 太小，反过来提高 max_tokens
+		newMaxTokens := budgetTokens + outputReserve
+		if result, err := sjson.SetBytes(body, "max_tokens", newMaxTokens); err == nil {
+			return result, true
+		}
+	}
+	return body, false
+}
+
 // NormalizeChineseLLMThinking rewrites the top-level `thinking` object for Chinese
 // LLM providers that use Anthropic-compatible endpoints but have different accepted
 // values for `thinking.type`. Currently scoped to:
