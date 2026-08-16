@@ -145,7 +145,9 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	job.Snapshot.FullPrompt = FullPromptFromScanText(scanText)
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
-		return r.finishFailure(ctx, job, &GuardError{Code: "no_enabled_endpoint", Retryable: true})
+		// [audit-only patch] 没有扫描端点时仍完整记录审计事件，只跳过内容扫描
+		LogWarn(EventChunkFailed, mergeLogFields(baseFields, map[string]any{"error_code": "no_enabled_endpoint", "status": "audit_only"}))
+		return r.completeAuditOnly(ctx, job, "no_enabled_endpoint")
 	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))
 	results := make([]*NormalizedResult, 0, len(chunks))
@@ -165,6 +167,10 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 				"error_code": guardErrorCode(scanErr), "status": "failed",
 			}))
 			r.observeAsyncFailure(scanErr, r.clock.Now().Sub(started))
+			// [audit-only patch] 扫描失败不再丢弃全文：落 event 保留记录，再走失败终态
+			if completeErr := r.completeAuditOnly(ctx, job, guardErrorCode(scanErr)); completeErr != nil {
+				LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"error_code": "audit_only_complete_failed", "status": "record_partial"}))
+			}
 			return r.finishFailure(ctx, job, scanErr)
 		}
 		results = append(results, result)
@@ -230,6 +236,33 @@ func decisionKindForResult(result *NormalizedResult) DecisionKind {
 	default:
 		return DecisionAllow
 	}
+}
+
+// [audit-only patch] 记录与扫描解绑：不依赖扫描结果，直接以 pass/low/allow 落审计事件。
+// reason 写入 ScannerBackend 以便在事件详情中区分"未经扫描"的记录。
+func (r *Runner) completeAuditOnly(ctx context.Context, job *Job, reason string) error {
+	latency := 0
+	if job.ProcessingStartedAt != nil {
+		latency = int(r.clock.Now().Sub(*job.ProcessingStartedAt).Milliseconds())
+	}
+	fallback := &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
+		Safety: "Unknown",
+		ScannerBackend: "audit-only:" + reason,
+		ScannerVersion: "no-scanner",
+		Categories: []string{}, MatchedScanners: []string{},
+		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
+		PolicyID: "priority", PolicyVersion: 1,
+		ChunkTotal: 0, LatencyMS: latency,
+	}
+	if _, err := r.repo.Complete(ctx, job, fallback, true); err != nil {
+		return err
+	}
+	if deleteErr := r.payload.Delete(ctx, job.ID); deleteErr != nil {
+		LogWarn(EventProcessFailed, map[string]any{"error_code": "payload_delete_failed", "status": "audit_only"})
+	}
+	LogInfo(EventProcessed, mergeLogFields(jobLogFields(job), map[string]any{"scanner_backend": fallback.ScannerBackend, "status": "done"}))
+	return nil
 }
 
 func (r *Runner) finishFailure(ctx context.Context, job *Job, err error) error {
