@@ -167,10 +167,6 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 				"error_code": guardErrorCode(scanErr), "status": "failed",
 			}))
 			r.observeAsyncFailure(scanErr, r.clock.Now().Sub(started))
-			// [audit-only patch] 扫描失败不再丢弃全文：落 event 保留记录，再走失败终态
-			if completeErr := r.completeAuditOnly(ctx, job, guardErrorCode(scanErr)); completeErr != nil {
-				LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"error_code": "audit_only_complete_failed", "status": "record_partial"}))
-			}
 			return r.finishFailure(ctx, job, scanErr)
 		}
 		results = append(results, result)
@@ -280,11 +276,23 @@ func (r *Runner) finishFailure(ctx context.Context, job *Job, err error) error {
 		}
 		LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "retry", "error_code": code, "retryable": true}))
 	} else {
-		if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
-			return updateErr
+		// [audit-only patch] 终态失败不再丢弃全文：以 audit-only 事件保留记录，job 按完成终态处理
+		if job.Snapshot.FullPrompt != "" {
+			if completeErr := r.completeAuditOnly(ctx, job, code); completeErr != nil {
+				LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"error_code": "audit_only_complete_failed", "status": "fallback_fail"}))
+				if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
+					return updateErr
+				}
+				_ = r.payload.Delete(ctx, job.ID)
+			}
+			LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed_recorded", "error_code": code, "retryable": false}))
+		} else {
+			if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
+				return updateErr
+			}
+			_ = r.payload.Delete(ctx, job.ID)
+			LogError(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed", "error_code": code, "retryable": false}))
 		}
-		_ = r.payload.Delete(ctx, job.ID)
-		LogError(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed", "error_code": code, "retryable": false}))
 	}
 	r.setLastError(code, err.Error())
 	return err

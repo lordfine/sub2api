@@ -417,8 +417,12 @@ func TestWorkerRetryBackoffTerminalFailureAndFailover(t *testing.T) {
 				require.Equal(t, now.Add(tt.wantBackoff), repo.retryAt)
 				require.Empty(t, payload.deleted)
 			} else {
-				require.Equal(t, 1, repo.failed)
-				require.Equal(t, tt.err.Code, repo.failedCode)
+				// [audit-only patch] 终态失败：不 Fail，以 audit-only 审计事件保留记录
+				require.Equal(t, 0, repo.failed)
+				require.NotNil(t, repo.completedResult)
+				require.Equal(t, EventPass, repo.completedResult.Decision)
+				require.Equal(t, "audit-only:"+tt.err.Code, repo.completedResult.ScannerBackend)
+				require.True(t, repo.completedStore)
 				require.Equal(t, []int64{51}, payload.deleted)
 			}
 			snapshot := metrics.Snapshot()
@@ -575,8 +579,8 @@ func TestPromptAuditSyntheticAsyncBaseline(t *testing.T) {
 	require.Equal(t, int64(1), snapshot.Timeouts)
 	require.Zero(t, knownBenignFindings)
 	require.Equal(t, 3, knownMaliciousBlocked)
-	require.Equal(t, 98, repo.completeCount)
-	require.Equal(t, 8, repo.eventCount, "store_pass_events=false only grows events for flag/block fixtures")
+	require.Equal(t, 99, repo.completeCount)
+	require.Equal(t, 9, repo.eventCount, "store_pass_events=false: flag/block fixtures + 1 audit-only terminal-failure record")
 	require.Positive(t, snapshot.LatencyP50MS)
 	require.LessOrEqual(t, snapshot.LatencyP50MS, snapshot.LatencyP95MS)
 	require.LessOrEqual(t, snapshot.LatencyP95MS, snapshot.LatencyP99MS)
