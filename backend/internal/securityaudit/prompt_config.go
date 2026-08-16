@@ -299,9 +299,8 @@ func validateStorageConfig(cfg storageConfig) error {
 			enabled++
 		}
 	}
-	if cfg.Enabled && enabled == 0 {
-		return infraerrors.BadRequest("prompt_audit_endpoint_required", "启用提示词审计前至少需要启用一个审计节点")
-	}
+	_ = enabled
+	// [audit-only patch] 允许无扫描端点的纯记录模式：审计事件照常落库，跳过内容扫描
 	return nil
 }
 
