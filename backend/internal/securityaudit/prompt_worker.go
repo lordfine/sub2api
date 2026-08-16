@@ -247,10 +247,10 @@ func (r *Runner) completeAuditOnly(ctx context.Context, job *Job, reason string)
 	}
 	fallback := &NormalizedResult{
 		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
-		Safety: "Unknown",
+		Safety:         "Unknown",
 		ScannerBackend: "audit-only:" + reason,
 		ScannerVersion: "no-scanner",
-		Categories: []string{}, MatchedScanners: []string{},
+		Categories:     []string{}, MatchedScanners: []string{},
 		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
 		PolicyID: "priority", PolicyVersion: 1,
 		ChunkTotal: 0, LatencyMS: latency,
