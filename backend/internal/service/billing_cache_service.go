@@ -1253,14 +1253,22 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 	dailyUsage := rec.DailyUsageUSD
 	weeklyUsage := rec.WeeklyUsageUSD
 	monthlyUsage := rec.MonthlyUsageUSD
+	newDailyStart := rec.DailyWindowStart
+	newWeeklyStart := rec.WeeklyWindowStart
+	newMonthlyStart := rec.MonthlyWindowStart
 	if quotaWindowExpired(rec.DailyWindowStart, timezone.StartOfDay(now)) {
 		dailyUsage = 0
+		start := timezone.StartOfDay(now)
+		newDailyStart = &start
 	}
 	if quotaWindowExpired(rec.WeeklyWindowStart, timezone.StartOfWeek(now)) {
 		weeklyUsage = 0
+		start := timezone.StartOfWeek(now)
+		newWeeklyStart = &start
 	}
 	if monthlyQuotaWindowExpired(rec.MonthlyWindowStart, now) {
 		monthlyUsage = 0
+		newMonthlyStart = &now
 	}
 
 	// Redis 故障时 fail-open：不回填，直接用 DB 数据做一次性检查
@@ -1284,9 +1292,9 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		DailyLimitUSD:      rec.DailyLimitUSD,
 		WeeklyLimitUSD:     rec.WeeklyLimitUSD,
 		MonthlyLimitUSD:    rec.MonthlyLimitUSD,
-		DailyWindowStart:   rec.DailyWindowStart,
-		WeeklyWindowStart:  rec.WeeklyWindowStart,
-		MonthlyWindowStart: rec.MonthlyWindowStart,
+		DailyWindowStart:   newDailyStart,
+		WeeklyWindowStart:  newWeeklyStart,
+		MonthlyWindowStart: newMonthlyStart,
 	}
 	if s.cache != nil {
 		ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second
@@ -1348,6 +1356,11 @@ func (s *BillingCacheService) checkUserWeeklyQuotaEligibility(ctx context.Contex
 	records, err := s.userPlatformQuotaRepo.ListByUser(ctx, userID)
 	if err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: load user weekly quota failed user=%d: %v (fail-open)", userID, err)
+		return nil
+	}
+	// 没有账本行表示此用户从未启用平台配额；无需写入聚合空缓存。
+	// 这既避免无额度用户多占一个 Redis key，也保持旧的无配额热路径不变。
+	if len(records) == 0 {
 		return nil
 	}
 	weekly := AggregateUserWeeklyQuota(records, now)
