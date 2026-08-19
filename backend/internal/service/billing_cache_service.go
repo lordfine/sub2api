@@ -1455,7 +1455,9 @@ func (s *BillingCacheService) HasUserPlatformQuotaLimit(ctx context.Context, use
 	if s.cache == nil {
 		return true
 	}
-	if weekly, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, userWeeklyQuotaCachePlatform); err != nil || !ok || weekly == nil || weekly.WeeklyLimitUSD != nil {
+	if weekly, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, userWeeklyQuotaCachePlatform); err != nil {
+		return true
+	} else if ok && weekly != nil && weekly.WeeklyLimitUSD != nil {
 		return true
 	}
 	entry, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, platform)
