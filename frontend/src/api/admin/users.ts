@@ -358,6 +358,15 @@ export interface PlatformQuotaUpdateItem {
 
 export interface PlatformQuotasResponse {
   platform_quotas: PlatformQuotaItem[]
+  user_weekly_quota?: UserWeeklyQuota
+}
+
+export interface UserWeeklyQuota {
+  weekly_limit_usd: number | null
+  weekly_usage_usd: number
+  weekly_remaining_usd: number | null
+  weekly_resets_at: string | null
+  unlimited: boolean
 }
 
 /**
@@ -399,6 +408,16 @@ export async function resetPlatformQuotaWindow(
   return data
 }
 
+export async function updateUserWeeklyQuota(
+  id: number,
+  weeklyLimitUSD: number | null
+): Promise<UserWeeklyQuota> {
+  const { data } = await apiClient.put<UserWeeklyQuota>(`/admin/users/${id}/weekly-quota`, {
+    weekly_limit_usd: weeklyLimitUSD,
+  })
+  return data
+}
+
 export const usersAPI = {
   list,
   getById,
@@ -417,6 +436,7 @@ export const usersAPI = {
   getPlatformQuotas,
   updatePlatformQuotas,
   resetPlatformQuotaWindow,
+  updateUserWeeklyQuota,
 }
 
 export default usersAPI

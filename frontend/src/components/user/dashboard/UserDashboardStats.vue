@@ -1,6 +1,6 @@
 <template>
   <!-- Row 1: Core Stats -->
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+  <div class="grid grid-cols-2 gap-4 lg:grid-cols-5">
     <!-- Balance -->
     <div v-if="!isSimple" class="card p-4">
       <div class="flex items-center gap-3">
@@ -62,6 +62,22 @@
             <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.total_actual_cost || 0) }}</span>
             <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.total_cost || 0) }}</span>
           </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 用户级自然周额度 -->
+    <div v-if="!isSimple && userWeeklyQuota" class="card p-4">
+      <div class="flex items-center gap-3">
+        <div class="rounded-lg bg-cyan-100 p-2 dark:bg-cyan-900/30">
+          <Icon name="chart" size="md" class="text-cyan-600 dark:text-cyan-400" :stroke-width="2" />
+        </div>
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">本周总额度</p>
+          <p v-if="userWeeklyQuota.unlimited" class="text-xl font-bold text-cyan-600 dark:text-cyan-400">无限制</p>
+          <p v-else class="text-xl font-bold text-gray-900 dark:text-white">${{ formatUsd(userWeeklyQuota.weekly_usage_usd) }} / ${{ formatUsd(userWeeklyQuota.weekly_limit_usd || 0) }}</p>
+          <p v-if="!userWeeklyQuota.unlimited" class="truncate text-xs text-gray-500 dark:text-gray-400">剩余 ${{ formatUsd(userWeeklyQuota.weekly_remaining_usd || 0) }}</p>
+          <p v-if="userWeeklyQuota.weekly_resets_at" class="truncate text-xs text-gray-500 dark:text-gray-400">{{ formatResetTime(userWeeklyQuota.weekly_resets_at) }} 重置</p>
         </div>
       </div>
     </div>
@@ -227,7 +243,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { UserDashboardStats as UserStatsType } from '@/api/usage'
-import type { PlatformQuotaItem } from '@/types'
+import type { PlatformQuotaItem, UserWeeklyQuota } from '@/types'
 
 interface FusedPlatformCard {
   platform: string
@@ -244,6 +260,7 @@ const props = defineProps<{
   balance: number
   isSimple: boolean
   platformQuotas?: PlatformQuotaItem[] | null
+  userWeeklyQuota?: UserWeeklyQuota | null
 }>()
 const { t } = useI18n()
 

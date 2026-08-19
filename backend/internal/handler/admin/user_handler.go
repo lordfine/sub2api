@@ -701,12 +701,116 @@ func (h *UserHandler) GetUserPlatformQuotas(c *gin.Context) {
 	for _, r := range records {
 		out = append(out, quotaview.LazyZeroQuotaForResponse(r, now, true)) // true = 暴露 window_start
 	}
-	response.Success(c, map[string]any{"platform_quotas": out})
+	weekly := service.AggregateUserWeeklyQuota(records, now)
+	response.Success(c, map[string]any{
+		"platform_quotas":   out,
+		"user_weekly_quota": userWeeklyQuotaResponse(weekly),
+	})
+}
+
+func userWeeklyQuotaResponse(quota service.UserWeeklyQuota) map[string]any {
+	var remaining *float64
+	if quota.WeeklyLimitUSD != nil {
+		value := *quota.WeeklyLimitUSD - quota.WeeklyUsageUSD
+		if value < 0 {
+			value = 0
+		}
+		remaining = &value
+	}
+	return map[string]any{
+		"weekly_limit_usd":     quota.WeeklyLimitUSD,
+		"weekly_usage_usd":     quota.WeeklyUsageUSD,
+		"weekly_remaining_usd": remaining,
+		"weekly_resets_at":     quota.WeeklyResetsAt.Format(time.RFC3339),
+		"unlimited":            quota.WeeklyLimitUSD == nil,
+	}
 }
 
 // UpdateUserPlatformQuotasRequest is the body for PUT /admin/users/:id/platform-quotas.
 type UpdateUserPlatformQuotasRequest struct {
 	Quotas []PlatformQuotaInput `json:"quotas" binding:"required"`
+}
+
+// UpdateUserWeeklyQuotaRequest 是用户级自然周总额度的输入。nil 代表无限制。
+type UpdateUserWeeklyQuotaRequest struct {
+	WeeklyLimitUSD *float64 `json:"weekly_limit_usd"`
+}
+
+// UpdateUserWeeklyQuota PUT /admin/users/:id/weekly-quota
+// 周额度属于用户而非平台。为兼容既有表，额度存于 anthropic 锚点行，所有其它平台行的
+// weekly_limit_usd 清空；各平台的 weekly_usage_usd 不变并继续提供账务审计。
+func (h *UserHandler) UpdateUserWeeklyQuota(c *gin.Context) {
+	if h.userPlatformQuotaRepo == nil {
+		response.Error(c, 503, "platform quota service not available")
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid user ID")
+		return
+	}
+	var req UpdateUserWeeklyQuotaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.WeeklyLimitUSD != nil && (*req.WeeklyLimitUSD < 0 || math.IsNaN(*req.WeeklyLimitUSD) || math.IsInf(*req.WeeklyLimitUSD, 0)) {
+		response.BadRequest(c, "weekly_limit_usd must be a finite number >= 0")
+		return
+	}
+	ctx := c.Request.Context()
+	if _, err := h.adminService.GetUser(ctx, userID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	records, err := h.userPlatformQuotaRepo.ListByUser(ctx, userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	byPlatform := make(map[string]service.UserPlatformQuotaRecord, len(records))
+	for _, record := range records {
+		byPlatform[record.Platform] = record
+	}
+	updated := make([]service.UserPlatformQuotaRecord, 0, len(service.AllowedQuotaPlatforms))
+	for _, platform := range service.AllowedQuotaPlatforms {
+		old := byPlatform[platform]
+		weeklyLimit := (*float64)(nil)
+		if platform == service.UserWeeklyQuotaAnchorPlatform {
+			weeklyLimit = req.WeeklyLimitUSD
+		}
+		updated = append(updated, service.UserPlatformQuotaRecord{
+			UserID:          userID,
+			Platform:        platform,
+			DailyLimitUSD:   old.DailyLimitUSD,
+			WeeklyLimitUSD:  weeklyLimit,
+			MonthlyLimitUSD: old.MonthlyLimitUSD,
+		})
+	}
+	if err := h.userPlatformQuotaRepo.UpsertForUser(ctx, userID, updated); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if h.billingCache != nil {
+		for _, platform := range service.AllowedQuotaPlatforms {
+			if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, platform); err != nil {
+				slog.Error("quota cache invalidation failed after user weekly quota update", "user_id", userID, "platform", platform, "err", err)
+			}
+		}
+		if err := h.billingCache.DeleteUserPlatformQuotaCache(ctx, userID, "__user_weekly__"); err != nil {
+			slog.Error("user weekly quota cache invalidation failed", "user_id", userID, "err", err)
+		}
+	}
+	slog.Info("admin.user_weekly_quota_updated",
+		"actor_admin_id", getAdminIDFromContext(c),
+		"target_user_id", userID,
+		"weekly_limit_usd", req.WeeklyLimitUSD)
+	newRecords, err := h.userPlatformQuotaRepo.ListByUser(ctx, userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, userWeeklyQuotaResponse(service.AggregateUserWeeklyQuota(newRecords, time.Now())))
 }
 
 // PlatformQuotaInput 单平台限额输入；limit 字段为 nil 表示不限制。
@@ -805,6 +909,18 @@ func (h *UserHandler) UpdateUserPlatformQuotas(c *gin.Context) {
 	beforeRecords, beforeErr := h.userPlatformQuotaRepo.ListByUser(ctx, userID)
 	if beforeErr != nil {
 		slog.Warn("quota audit before snapshot failed", "user_id", userID, "err", beforeErr)
+	}
+	// 周额度已改为用户级总额；平台配额接口只负责日/月设置，必须保留已有 weekly 字段，
+	// 防止管理员编辑日/月时误将 anthropic 锚点上的用户周额度清空。
+	if beforeErr == nil {
+		for i := range records {
+			for _, previous := range beforeRecords {
+				if previous.Platform == records[i].Platform {
+					records[i].WeeklyLimitUSD = previous.WeeklyLimitUSD
+					break
+				}
+			}
+		}
 	}
 	if err := h.userPlatformQuotaRepo.UpsertForUser(ctx, userID, records); err != nil {
 		response.ErrorFrom(c, err)

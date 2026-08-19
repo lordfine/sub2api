@@ -2209,7 +2209,8 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 	}
 	if errors.Is(err, service.ErrUserPlatformDailyQuotaExhausted) ||
 		errors.Is(err, service.ErrUserPlatformWeeklyQuotaExhausted) ||
-		errors.Is(err, service.ErrUserPlatformMonthlyQuotaExhausted) {
+		errors.Is(err, service.ErrUserPlatformMonthlyQuotaExhausted) ||
+		errors.Is(err, service.ErrUserWeeklyQuotaExhausted) {
 		// 与 RPM 超限一致映射 429 + Retry-After，让 SDK 自动退避（而非 403 直接失败）。
 		// 错误码用 rate_limit_exceeded 与 OpenAI 兼容客户端一致；细分类型由 ErrCode + window_resets_at metadata 区分。
 		msg := pkgerrors.Message(err)

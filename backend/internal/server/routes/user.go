@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"strings"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -13,9 +15,15 @@ func RegisterUserRoutes(
 	v1 *gin.RouterGroup,
 	h *handler.Handlers,
 	jwtAuth middleware.JWTAuthMiddleware,
+	apiKeyAuth middleware.APIKeyAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 ) {
+	// GET /api/v1/quota 同时面向 API key 和 Web 登录态。
+	// API key（Bearer sk-... 或专用 key header）优先走网关鉴权；其余 Bearer token 走 JWT。
+	// 这样用户可用同一接口在脚本和仪表盘读取自己的额度，而不能查询他人额度。
+	v1.GET("/quota", userQuotaAuth(jwtAuth, apiKeyAuth), h.User.GetMyWeeklyQuota)
+
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))
@@ -128,5 +136,18 @@ func RegisterUserRoutes(
 			monitors.GET("", h.ChannelMonitor.List)
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
+	}
+}
+
+func userQuotaAuth(jwtAuth middleware.JWTAuthMiddleware, apiKeyAuth middleware.APIKeyAuthMiddleware) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+		if strings.HasPrefix(strings.ToLower(authorization), "bearer sk-") ||
+			strings.TrimSpace(c.GetHeader("x-api-key")) != "" ||
+			strings.TrimSpace(c.GetHeader("x-goog-api-key")) != "" {
+			apiKeyAuth(c)
+			return
+		}
+		jwtAuth(c)
 	}
 }
