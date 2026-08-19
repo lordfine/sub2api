@@ -142,11 +142,15 @@ func (f *fakeFullCache) getLastSetTTL() time.Duration {
 	return f.lastSetTTL
 }
 
-func (f *fakeFullCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, _ string) (*UserPlatformQuotaCacheEntry, bool, error) {
+func (f *fakeFullCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.getErr != nil {
 		return nil, false, f.getErr
+	}
+	// 用户总周额度使用独立的 Redis 键，不能复用本测试替身的分平台 entry。
+	if platform == userWeeklyQuotaCachePlatform {
+		return nil, false, nil
 	}
 	if f.entry == nil {
 		return nil, false, nil
