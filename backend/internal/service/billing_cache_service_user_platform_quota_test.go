@@ -47,14 +47,20 @@ func TestIncrementUserPlatformQuotaUsage_SyncCallsCache(t *testing.T) {
 	s.IncrementUserPlatformQuotaUsage(101, "anthropic", 0.25)
 	s.IncrementUserPlatformQuotaUsage(101, "openai", 0.50)
 
-	if len(fake.calls) != 2 {
-		t.Fatalf("expected 2 incr calls, got %d", len(fake.calls))
+	if len(fake.calls) != 4 {
+		t.Fatalf("expected 4 incr calls, got %d", len(fake.calls))
 	}
 	if fake.calls[0] != (incrCall{userID: 101, platform: "anthropic", cost: 0.25, ttl: 120 * time.Second, markDirty: false}) {
 		t.Errorf("call[0] = %+v", fake.calls[0])
 	}
-	if fake.calls[1] != (incrCall{userID: 101, platform: "openai", cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+	if fake.calls[1] != (incrCall{userID: 101, platform: userWeeklyQuotaCachePlatform, cost: 0.25, ttl: 120 * time.Second, markDirty: false}) {
 		t.Errorf("call[1] = %+v", fake.calls[1])
+	}
+	if fake.calls[2] != (incrCall{userID: 101, platform: "openai", cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+		t.Errorf("call[2] = %+v", fake.calls[2])
+	}
+	if fake.calls[3] != (incrCall{userID: 101, platform: userWeeklyQuotaCachePlatform, cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+		t.Errorf("call[3] = %+v", fake.calls[3])
 	}
 }
 
@@ -769,9 +775,9 @@ func TestHasUserPlatformQuotaLimit(t *testing.T) {
 	daily := 5.0
 
 	tests := []struct {
-		name    string
-		setup   func() *BillingCacheService
-		want    bool
+		name  string
+		setup func() *BillingCacheService
+		want  bool
 	}{
 		{
 			name: "has_limit",
