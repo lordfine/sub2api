@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
 // ErrUserPlatformQuotaNotFound service 层 sentinel：quota 记录不存在。
@@ -14,6 +16,19 @@ var ErrUserPlatformQuotaNotFound = errors.New("user platform quota not found")
 // ErrUserPlatformQuotaFKViolation service 层 sentinel：批量 snapshot UPSERT 时存在
 // user_id 不在 users 表的记录（外键违反）。adapter 负责将 repository 层同名 sentinel 包装为此错误。
 var ErrUserPlatformQuotaFKViolation = errors.New("user platform quota snapshot FK violation")
+
+// UserWeeklyQuotaAnchorPlatform 是用户级周额度的配置锚点。周额度属于用户而非平台，
+// 但为兼容既有 user_platform_quotas 表，额度值固定存放在 anthropic 这一已有行中。
+// 其它平台行的 weekly_limit_usd 均应为 NULL，weekly_usage_usd 仍按平台落盘以保留审计颗粒度。
+const UserWeeklyQuotaAnchorPlatform = "anthropic"
+
+// UserWeeklyQuota 是跨平台聚合后的自然周额度视图。
+type UserWeeklyQuota struct {
+	WeeklyLimitUSD    *float64
+	WeeklyUsageUSD    float64
+	WeeklyResetsAt    time.Time
+	WeeklyWindowStart time.Time
+}
 
 // UserPlatformQuotaSnapshot 是 service 层 flusher 向 DB 写入快照时使用的传输结构。
 // 字段语义与 repository.UserPlatformQuotaSnapshot 完全对应，由 adapter 负责转换。
@@ -42,6 +57,25 @@ type UserPlatformQuotaRecord struct {
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
+}
+
+// AggregateUserWeeklyQuota 将用户各平台的本周用量合并成一个自然周桶。
+// 窗口完全由 now 推导：过期行不计入本周，因此跨周一零点无需 cron 清零。
+func AggregateUserWeeklyQuota(records []UserPlatformQuotaRecord, now time.Time) UserWeeklyQuota {
+	start := timezone.StartOfWeek(now)
+	result := UserWeeklyQuota{
+		WeeklyWindowStart: start,
+		WeeklyResetsAt:    start.AddDate(0, 0, 7),
+	}
+	for _, record := range records {
+		if record.Platform == UserWeeklyQuotaAnchorPlatform {
+			result.WeeklyLimitUSD = record.WeeklyLimitUSD
+		}
+		if record.WeeklyWindowStart != nil && record.WeeklyWindowStart.Equal(start) {
+			result.WeeklyUsageUSD += record.WeeklyUsageUSD
+		}
+	}
+	return result
 }
 
 // UserPlatformQuotaRepository 定义 service 层所需的 user × platform quota 数据访问端口。

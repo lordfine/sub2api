@@ -69,6 +69,52 @@ func (h *UserHandler) GetMyPlatformQuotas(c *gin.Context) {
 	response.Success(c, map[string]any{"platform_quotas": out})
 }
 
+// GetMyWeeklyQuota GET /api/v1/quota
+// API Key 与 Web 登录态共用：两种认证中间件均会在 context 中写入所属用户。
+// 返回用户级自然周总额度，而不是某个平台的局部用量。
+func (h *UserHandler) GetMyWeeklyQuota(c *gin.Context) {
+	var userID int64
+	if apiKey, ok := middleware2.GetAPIKeyFromContext(c); ok && apiKey != nil {
+		userID = apiKey.UserID
+	} else if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok {
+		userID = subject.UserID
+	} else {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.userPlatformQuotaRepo == nil {
+		response.Success(c, map[string]any{
+			"weekly_limit_usd":     nil,
+			"weekly_usage_usd":     0,
+			"weekly_remaining_usd": nil,
+			"weekly_resets_at":     nil,
+			"unlimited":            true,
+		})
+		return
+	}
+	records, err := h.userPlatformQuotaRepo.ListByUser(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	quota := service.AggregateUserWeeklyQuota(records, time.Now())
+	var remaining *float64
+	if quota.WeeklyLimitUSD != nil {
+		value := *quota.WeeklyLimitUSD - quota.WeeklyUsageUSD
+		if value < 0 {
+			value = 0
+		}
+		remaining = &value
+	}
+	response.Success(c, map[string]any{
+		"weekly_limit_usd":     quota.WeeklyLimitUSD,
+		"weekly_usage_usd":     quota.WeeklyUsageUSD,
+		"weekly_remaining_usd": remaining,
+		"weekly_resets_at":     quota.WeeklyResetsAt.Format(time.RFC3339),
+		"unlimited":            quota.WeeklyLimitUSD == nil,
+	})
+}
+
 // ChangePasswordRequest represents the change password request payload
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password" binding:"required"`

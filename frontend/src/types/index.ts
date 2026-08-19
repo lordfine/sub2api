@@ -2364,4 +2364,5 @@ export type {
   PlatformQuotaPlatform,
   PlatformQuotaWindow,
   PlatformQuotasResponse,
+  UserWeeklyQuota,
 } from '@/api/admin/users'
