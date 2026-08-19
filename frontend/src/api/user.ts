@@ -17,6 +17,7 @@ import type {
   UserAffiliateDetail,
   AffiliateTransferResponse,
   PlatformQuotasResponse,
+  UserWeeklyQuota,
 } from '@/types'
 
 /**
@@ -194,6 +195,12 @@ export async function getMyPlatformQuotas(): Promise<PlatformQuotasResponse> {
   return data
 }
 
+/** 获取当前用户跨平台汇总的自然周额度。 */
+export async function getMyWeeklyQuota(): Promise<UserWeeklyQuota> {
+  const { data } = await apiClient.get<UserWeeklyQuota>('/quota')
+  return data
+}
+
 export const userAPI = {
   getProfile,
   updateProfile,
@@ -210,6 +217,7 @@ export const userAPI = {
   getAffiliateDetail,
   transferAffiliateQuota,
   getMyPlatformQuotas,
+  getMyWeeklyQuota,
 }
 
 export default userAPI
