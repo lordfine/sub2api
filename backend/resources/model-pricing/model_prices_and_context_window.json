@@ -2713,6 +2713,56 @@
     "supports_url_context": true,
     "supports_vision": true
   },
+  "glm-5.3": {
+    "cache_creation_input_token_cost": 0.0,
+    "litellm_provider": "zhipu",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 81920,
+    "max_tokens": 1000000,
+    "mode": "chat",
+    "multi_vendor": true,
+    "supports_function_calling": true,
+    "supports_native_streaming": true,
+    "supports_prompt_caching": true,
+    "supports_reasoning": true,
+    "supports_response_schema": true,
+    "supports_system_messages": true,
+    "supports_tool_choice": true,
+    "supported_input_modalities": [
+      "text"
+    ],
+    "supported_output_modalities": [
+      "text"
+    ],
+    "input_cost_per_token": 1.2324929971988797e-06,
+    "output_cost_per_token": 4.3137254901960795e-06,
+    "cache_read_input_token_cost": 3.081232492997199e-07
+  },
+  "glm-5.3-flash": {
+    "cache_creation_input_token_cost": 0.0,
+    "litellm_provider": "zhipu",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 81920,
+    "max_tokens": 1000000,
+    "mode": "chat",
+    "multi_vendor": true,
+    "supports_function_calling": true,
+    "supports_native_streaming": true,
+    "supports_prompt_caching": true,
+    "supports_reasoning": true,
+    "supports_response_schema": true,
+    "supports_system_messages": true,
+    "supports_tool_choice": true,
+    "supported_input_modalities": [
+      "text"
+    ],
+    "supported_output_modalities": [
+      "text"
+    ],
+    "input_cost_per_token": 1.1204481792717087e-07,
+    "output_cost_per_token": 3.92156862745098e-07,
+    "cache_read_input_token_cost": 3.2212885154061626e-08
+  },
   "gpt-3.5-turbo": {
     "input_cost_per_token": 5e-07,
     "litellm_provider": "openai",
