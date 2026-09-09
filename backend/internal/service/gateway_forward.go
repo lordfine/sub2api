@@ -117,21 +117,22 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
-	// 前置修正：确保 thinking.budget_tokens < max_tokens。
-	// Claude Code 有时发出矛盾参数（budget_tokens >= max_tokens），
-	// 阿里云等上游直接返回 400。在任何转发分支之前统一修正。
-	if account != nil {
-		if rewritten, applied := EnsureBudgetWithinMaxTokens(parsed.Body.Bytes()); applied {
-			if err := parsed.ReplaceBody(rewritten); err != nil {
-				return nil, fmt.Errorf("rewrite request body: %w", err)
-			}
-			logger.LegacyPrintf("service.gateway", "Account %d: rectified thinking.budget_tokens >= max_tokens pre-forward", account.ID)
-		}
-	}
-
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
 	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, parsed.Body.Bytes()) {
 		return s.handleWebSearchEmulation(ctx, c, account, parsed)
+	}
+
+	// 火山 Coding Plan 不支持 web_search 等 server tool，带工具定义转发必 403，
+	// 且 403 在 failover 名单会轮完全部 coding 账户并累积错误计数打停账户
+	// （2026-09-09 事故，acc31/acc34）。转发前剥掉工具定义，模型无感降级；
+	// 覆盖其后所有转发分支（含 passthrough）。
+	if account != nil && isVolcCodingPlanAccount(account) {
+		if rewritten, stripped := StripWebSearchTools(parsed.Body.Bytes()); len(stripped) > 0 {
+			if err := parsed.ReplaceBody(rewritten); err != nil {
+				return nil, fmt.Errorf("rewrite request body: %w", err)
+			}
+			logger.LegacyPrintf("service.gateway", "Account %d: stripped web_search tool(s) %v pre-forward (coding plan)", account.ID, stripped)
+		}
 	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
