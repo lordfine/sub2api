@@ -146,7 +146,8 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
 		// [audit-only patch] 没有扫描端点时仍完整记录审计事件，只跳过内容扫描
-		LogWarn(EventChunkFailed, mergeLogFields(baseFields, map[string]any{"error_code": "no_enabled_endpoint", "status": "audit_only"}))
+		// (2026-09-21) 预期路径降为 Info 专用事件：audit-only 留档模式下每天 ~7000 条，warn 语义误导
+		LogInfo(EventAuditOnlySkipped, mergeLogFields(baseFields, map[string]any{"error_code": "no_enabled_endpoint", "status": "audit_only"}))
 		return r.completeAuditOnly(ctx, job, "no_enabled_endpoint")
 	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))

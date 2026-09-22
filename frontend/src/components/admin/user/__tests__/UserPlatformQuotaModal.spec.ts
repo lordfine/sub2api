@@ -6,6 +6,7 @@ const apiMocks = vi.hoisted(() => ({
   showError: vi.fn(),
   getPlatformQuotas: vi.fn(),
   updatePlatformQuotas: vi.fn(),
+  updateUserWeeklyQuota: vi.fn(),
   resetPlatformQuotaWindow: vi.fn(),
 }))
 
@@ -14,6 +15,7 @@ vi.mock('@/api/admin', () => ({
     users: {
       getPlatformQuotas: apiMocks.getPlatformQuotas,
       updatePlatformQuotas: apiMocks.updatePlatformQuotas,
+      updateUserWeeklyQuota: apiMocks.updateUserWeeklyQuota,
       resetPlatformQuotaWindow: apiMocks.resetPlatformQuotaWindow,
     },
   },
@@ -152,8 +154,8 @@ describe('UserPlatformQuotaModal', () => {
     })
     const w = await mountAndOpen()
     const inputs = w.findAll('input[type=number]')
-    // 13 platforms × 3 windows = 39 inputs
-    expect(inputs.length).toBe(39)
+    // 13 个平台各 3 个限额，加 1 个用户级周限输入框。
+    expect(inputs.length).toBe(40)
     // 第一个 input 是 anthropic.daily = 10
     expect((inputs[0].element as HTMLInputElement).value).toBe('10')
   })

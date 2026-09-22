@@ -15,12 +15,6 @@
       <p class="text-sm text-gray-600 dark:text-gray-400">
         {{ t('admin.users.platformQuota.subtitle', { email: user.email }) }}
       </p>
-      <div v-if="!loading" class="rounded-lg border border-cyan-200 bg-cyan-50 p-3 dark:border-cyan-500/30 dark:bg-cyan-500/10">
-        <label class="block text-sm font-medium text-cyan-900 dark:text-cyan-100">用户级自然周总额度（美元）</label>
-        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">所有平台的消费合并计算；留空为无限制，周一 00:00 自动重置。</p>
-        <input v-model.number="userWeeklyLimit" type="number" min="0" step="0.01" class="input mt-2 w-32" placeholder="无限制" />
-        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">已用 {{ formatUsage(userWeeklyUsage) }}，下次 {{ userWeeklyResetsAt || '-' }} 重置</p>
-      </div>
       <div v-if="loading" class="py-10 text-center text-gray-500">{{ t('common.loading') }}</div>
       <div v-else class="overflow-x-auto">
         <table class="min-w-full text-sm">
@@ -28,6 +22,7 @@
             <tr class="border-b border-gray-200 text-gray-700 dark:border-dark-700 dark:text-gray-300">
               <th class="px-3 py-2 text-left font-medium">{{ t('admin.users.platformQuota.columns.platform') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('admin.users.platformQuota.columns.daily') }}</th>
+              <th class="px-3 py-2 text-left font-medium">{{ t('admin.users.platformQuota.columns.weekly') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('admin.users.platformQuota.columns.monthly') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('admin.users.platformQuota.columns.usage') }}</th>
             </tr>
@@ -104,6 +99,13 @@
             {{ t('admin.users.platformQuota.clearAll') }}
           </button>
         </div>
+
+      <div v-if="!loading" class="rounded-lg border border-cyan-200 bg-cyan-50 p-3 dark:border-cyan-500/30 dark:bg-cyan-500/10">
+        <label class="block text-sm font-medium text-cyan-900 dark:text-cyan-100">用户级自然周总额度（美元）</label>
+        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">所有平台的消费合并计算；留空为无限制，周一 00:00 自动重置。</p>
+        <input v-model.number="userWeeklyLimit" type="number" min="0" step="0.01" class="input mt-2 w-32" placeholder="无限制" />
+        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">已用 {{ formatUsage(userWeeklyUsage) }}，下次 {{ userWeeklyResetsAt || '-' }} 重置</p>
+      </div>
       </div>
     </div>
     <template #footer>
@@ -234,6 +236,7 @@ function onClearAll() {
   if (!confirmed) return
   for (const row of quotas.value) {
     row.daily_limit_usd = null
+    row.weekly_limit_usd = null
     row.monthly_limit_usd = null
   }
   userWeeklyLimit.value = null
@@ -266,7 +269,7 @@ async function onSave() {
     const payload = quotas.value.map((r) => ({
       platform: r.platform,
       daily_limit_usd: normalizeLimit(r.daily_limit_usd),
-      weekly_limit_usd: null,
+      weekly_limit_usd: normalizeLimit(r.weekly_limit_usd),
       monthly_limit_usd: normalizeLimit(r.monthly_limit_usd),
     }))
     await adminAPI.users.updatePlatformQuotas(props.user.id, payload)
