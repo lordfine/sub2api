@@ -77,6 +77,35 @@ beforeEach(() => {
 })
 
 describe('UserPlatformQuotaModal', () => {
+  it.each([
+    ['保持原值', undefined, 175],
+    ['修改额度', '275', 275],
+    ['额度为零', '0', 0],
+    ['主动清空', '', null],
+  ] as const)('%s时准确保存用户级周额度', async (_scenario, input, expected) => {
+    apiMocks.getPlatformQuotas.mockResolvedValueOnce({
+      platform_quotas: [],
+      user_weekly_quota: {
+        weekly_limit_usd: 175,
+        weekly_usage_usd: 12.5,
+        weekly_resets_at: '2026-11-16T00:00:00+08:00',
+      },
+    })
+    const w = await mountAndOpen()
+    const inputs = w.findAll('input[type=number]')
+    const weeklyInput = inputs[inputs.length - 1]
+    expect((weeklyInput.element as HTMLInputElement).value).toBe('175')
+    if (input !== undefined) {
+      await weeklyInput.setValue(input)
+    }
+    await w.findAll('button').find(b => b.text() === 'admin.users.platformQuota.save')!.trigger('click')
+    await flushPromises()
+    expect(apiMocks.updateUserWeeklyQuota).toHaveBeenCalledTimes(1)
+    expect(apiMocks.updateUserWeeklyQuota).toHaveBeenCalledWith(99, expected)
+    expect(w.emitted('success')).toHaveLength(1)
+    w.unmount()
+  })
+
   it.each([0, 4, 14, 17])('does not turn a negative limit in input %s into unlimited', async (index) => {
     const w = await mountAndOpen()
     await w.findAll('input[type=number]')[index].setValue('-1')
