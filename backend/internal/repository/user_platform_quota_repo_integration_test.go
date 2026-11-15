@@ -265,6 +265,56 @@ func TestUserPlatformQuotaRepository_IncrementUsageWithReset_NoRowIsNoop(t *test
 	require.Empty(t, list)
 }
 
+// 用户级周额度跨平台累计：没有平台行（如 opencode_go 分组）的用量记到 anthropic 锚点行，
+// 否则这部分用量绕过周额度；已有平台行时仍记在本平台行。
+func TestUserPlatformQuotaRepository_IncrementUsageWithReset_MissingPlatformFallsBackToAnchor(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	userID := mustCreateUserForQuota(t, client)
+	repo := NewUserPlatformQuotaRepository(client)
+	mustSeedQuotaRow(t, ctx, repo, userID, "anthropic")
+	mustSeedQuotaRow(t, ctx, repo, userID, "openai")
+
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.IncrementUsageWithReset(ctx, userID, "anthropic", 1.0, now))
+	require.NoError(t, repo.IncrementUsageWithReset(ctx, userID, "opencode_go", 2.5, now))
+	require.NoError(t, repo.IncrementUsageWithReset(ctx, userID, "openai", 0.5, now))
+
+	anchor, err := repo.GetByUserPlatform(ctx, userID, "anthropic")
+	require.NoError(t, err)
+	require.NotNil(t, anchor)
+	require.InDelta(t, 3.5, anchor.WeeklyUsageUSD, 1e-9, "missing platform usage lands on anchor row")
+	openai, err := repo.GetByUserPlatform(ctx, userID, "openai")
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, openai.WeeklyUsageUSD, 1e-9, "existing platform row keeps its own usage")
+	missing, err := repo.GetByUserPlatform(ctx, userID, "opencode_go")
+	require.NoError(t, err)
+	require.Nil(t, missing, "fallback must not create a platform row")
+
+	list, err := repo.ListByUser(ctx, userID)
+	require.NoError(t, err)
+	total := 0.0
+	for _, rec := range list {
+		total += rec.WeeklyUsageUSD
+	}
+	require.InDelta(t, 4.0, total, 1e-9, "user weekly total covers every platform")
+}
+
+// 没有任何额度行的用户，缺失平台的用量仍然不建行。
+func TestUserPlatformQuotaRepository_IncrementUsageWithReset_MissingPlatformNoAnchorIsNoop(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	userID := mustCreateUserForQuota(t, client)
+	repo := NewUserPlatformQuotaRepository(client)
+
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, repo.IncrementUsageWithReset(ctx, userID, "opencode_go", 2.5, now))
+
+	list, err := repo.ListByUser(ctx, userID)
+	require.NoError(t, err)
+	require.Empty(t, list)
+}
+
 func TestUserPlatformQuotaRepository_ResetExpiredWindow(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)

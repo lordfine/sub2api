@@ -13,6 +13,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
 
+// userWeeklyQuotaAnchorPlatform 必须与 service.UserWeeklyQuotaAnchorPlatform 一致：
+// 用户级周额度的限额存于这一行，缺失平台行的用量也记到这一行。
+const userWeeklyQuotaAnchorPlatform = domain.PlatformAnthropic
+
 // UserPlatformQuotaRecord 是 repository 层的传输结构体，
 // 与 ent.UserPlatformQuota 实体解耦，供业务层使用。
 type UserPlatformQuotaRecord struct {
@@ -176,18 +180,25 @@ func (r *userPlatformQuotaRepository) ListByUser(ctx context.Context, userID int
 // 行为：
 //   - 记录存在：在事务内 SELECT FOR UPDATE，按 (prev_window_start vs current_window_start)
 //     判断是否需要重置（不同 = 重置为 cost；相同 = 累加 cost）
-//   - 记录不存在：直接返回 nil，不建行。限额只存在于 user_platform_quotas 的行中，
-//     不存在的行等价于不限额，没有可累加的对象。
+//   - 记录不存在：改记到用户的周额度锚点行（anthropic）。用户级周额度把该用户所有行的
+//     weekly_usage_usd 相加，平台行缺失时若直接丢弃，这部分用量就绕过了周额度。
+//     锚点行也不存在时返回 nil，不建行（该用户没有配置任何额度）。
 func (r *userPlatformQuotaRepository) IncrementUsageWithReset(ctx context.Context, userID int64, platform string, cost float64, now time.Time) error {
 	return r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
-		existing, err := txClient.UserPlatformQuota.Query().
-			Where(
-				userplatformquota.UserIDEQ(userID),
-				userplatformquota.PlatformEQ(platform),
-				userplatformquota.DeletedAtIsNil(),
-			).
-			ForUpdate().
-			Only(txCtx)
+		lockRow := func(p string) (*dbent.UserPlatformQuota, error) {
+			return txClient.UserPlatformQuota.Query().
+				Where(
+					userplatformquota.UserIDEQ(userID),
+					userplatformquota.PlatformEQ(p),
+					userplatformquota.DeletedAtIsNil(),
+				).
+				ForUpdate().
+				Only(txCtx)
+		}
+		existing, err := lockRow(platform)
+		if dbent.IsNotFound(err) && platform != userWeeklyQuotaAnchorPlatform {
+			existing, err = lockRow(userWeeklyQuotaAnchorPlatform)
+		}
 		if dbent.IsNotFound(err) {
 			return nil
 		}
