@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -239,6 +240,70 @@ func resolveConvergedInstallationID(account *Account, seed string) string {
 	return deriveStableUUIDv4("sub2api:codex-install-id:v2:" + seed)
 }
 
+// codexFingerprintDevicePoolSizeExtraKey 设备池大小（device 模式专用）。
+// 大于 1 时，device 模式不再把所有人收敛成 1 台设备，而是收敛成 N 台虚拟设备，
+// 每个用户固定落在其中一台（黏用户），上游看到的是 N 台设备而非 1 台或人数台。
+const codexFingerprintDevicePoolSizeExtraKey = "codex_fingerprint_device_pool_size"
+
+// codexFingerprintDevicePoolAssignExtraKey 管理员指定的 用户ID -> 设备序号（0..N-1）映射，
+// 用于让各设备上的人数均衡；未指定的用户按 用户ID 取模分配。
+const codexFingerprintDevicePoolAssignExtraKey = "codex_fingerprint_device_pool_assign"
+
+const codexFingerprintDevicePoolMaxSize = 16
+
+// codexFingerprintDevicePoolSize 返回设备池大小；未配置、非法或 <=1 时返回 1（即原单设备行为）。
+func codexFingerprintDevicePoolSize(account *Account) int {
+	if account == nil || account.Extra == nil {
+		return 1
+	}
+	raw, ok := account.Extra[codexFingerprintDevicePoolSizeExtraKey]
+	if !ok {
+		return 1
+	}
+	n := parseExtraInt(raw)
+	if n <= 1 {
+		return 1
+	}
+	if n > codexFingerprintDevicePoolMaxSize {
+		return codexFingerprintDevicePoolMaxSize
+	}
+	return n
+}
+
+// codexFingerprintDevicePoolSlot 返回用户固定使用的设备序号；userID<=0（取不到用户）时返回 0。
+func codexFingerprintDevicePoolSlot(account *Account, userID int64, size int) int {
+	if size <= 1 || userID <= 0 {
+		return 0
+	}
+	if account != nil && account.Extra != nil {
+		if assign, ok := account.Extra[codexFingerprintDevicePoolAssignExtraKey].(map[string]any); ok {
+			if v, ok := assign[strconv.FormatInt(userID, 10)]; ok {
+				slot := parseExtraInt(v)
+				if slot >= 0 && slot < size {
+					return slot
+				}
+			}
+		}
+	}
+	return int(userID % int64(size))
+}
+
+// resolveConvergedInstallationIDForUser 在设备池模式下按用户所在设备序号派生 installation_id。
+// 序号 0 与原单设备 installation_id 相同，开启设备池时原有设备身份得以延续。
+// 管理员配置了真实 device_id 时设备池不生效（真实设备只有一台）。
+func resolveConvergedInstallationIDForUser(account *Account, seed string, userID int64) string {
+	base := resolveConvergedInstallationID(account, seed)
+	if base == "" || account.GetOpenAIDeviceID() != "" {
+		return base
+	}
+	size := codexFingerprintDevicePoolSize(account)
+	slot := codexFingerprintDevicePoolSlot(account, userID, size)
+	if slot == 0 {
+		return base
+	}
+	return deriveStableUUIDv4("sub2api:codex-install-id:v2:" + seed + ":pool:" + strconv.Itoa(slot))
+}
+
 // resolveConvergedSessionID 返回账号级恒定的 session_id。
 func resolveConvergedSessionID(seed string) string {
 	if seed == "" {
@@ -280,6 +345,12 @@ type codexFingerprintIDs struct {
 // 返回 nil 表示 off 模式，不需要改写。
 // 注意：包含随机生成的 turn_id，调用方必须只调用一次并共享结果给头改写和体改写。
 func resolveCodexFingerprintIDs(account *Account, clientSessionID string, mode codexFingerprintMode) *codexFingerprintIDs {
+	return resolveCodexFingerprintIDsForUser(account, clientSessionID, mode, 0)
+}
+
+// resolveCodexFingerprintIDsForUser 同 resolveCodexFingerprintIDs，额外带上请求用户 ID，
+// device 模式配置了设备池时据此把用户黏到固定的虚拟设备上。
+func resolveCodexFingerprintIDsForUser(account *Account, clientSessionID string, mode codexFingerprintMode, userID int64) *codexFingerprintIDs {
 	if account == nil || mode == codexFingerprintOff {
 		return nil
 	}
@@ -294,7 +365,11 @@ func resolveCodexFingerprintIDs(account *Account, clientSessionID string, mode c
 		turnStartedAtUnixMs: time.Now().UnixMilli(),
 	}
 
-	ids.installationID = resolveConvergedInstallationID(account, seed)
+	if mode == codexFingerprintDevice {
+		ids.installationID = resolveConvergedInstallationIDForUser(account, seed, userID)
+	} else {
+		ids.installationID = resolveConvergedInstallationID(account, seed)
+	}
 	if ids.installationID == "" {
 		return nil
 	}
@@ -338,6 +413,35 @@ func extractClientSessionID(h http.Header) string {
 // 结合账号配置一次性解析收敛 ID 集合。调用方应将返回的 ids 同时传给
 // applyCodexFingerprintHeaders 和 applyCodexFingerprintClientMetadata。
 func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.Header) *codexFingerprintIDs {
+	return resolveCodexFingerprintIDsFromRequestForUser(account, clientHeaders, 0)
+}
+
+// resolveCodexFingerprintIDsFromContext 从 gin context 取客户端请求头和请求用户，解析收敛 ID。
+func resolveCodexFingerprintIDsFromContext(c *gin.Context, account *Account) *codexFingerprintIDs {
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	return resolveCodexFingerprintIDsFromRequestForUser(account, clientHeaders, getAPIKeyUserIDFromContext(c))
+}
+
+// getAPIKeyUserIDFromContext 返回当前请求 API Key 所属用户 ID；取不到返回 0。
+func getAPIKeyUserIDFromContext(c *gin.Context) int64 {
+	if c == nil {
+		return 0
+	}
+	v, exists := c.Get("api_key")
+	if !exists {
+		return 0
+	}
+	apiKey, ok := v.(*APIKey)
+	if !ok || apiKey == nil {
+		return 0
+	}
+	return apiKey.UserID
+}
+
+func resolveCodexFingerprintIDsFromRequestForUser(account *Account, clientHeaders http.Header, userID int64) *codexFingerprintIDs {
 	if account == nil {
 		return nil
 	}
@@ -349,7 +453,7 @@ func resolveCodexFingerprintIDsFromRequest(account *Account, clientHeaders http.
 	if clientHeaders != nil {
 		clientSessionID = extractClientSessionID(clientHeaders)
 	}
-	return resolveCodexFingerprintIDs(account, clientSessionID, mode)
+	return resolveCodexFingerprintIDsForUser(account, clientSessionID, mode, userID)
 }
 
 // applyCodexFingerprintHeaders 按预计算的收敛 ID 改写出站 HTTP 头中的设备指纹。
