@@ -22,7 +22,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push release
-        if: github.ref_name != 'upgrade-2019-weekly' && github.ref_name != 'upgrade-2020-weekly'
+        # 升级发布分支（upgrade- 开头）只推 candidate-<提交SHA>，不覆盖 custom / latest
+        if: ${{ !startsWith(github.ref_name, 'upgrade-') }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -37,7 +38,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Build and push upgrade candidate
-        if: github.ref_name == 'upgrade-2019-weekly' || github.ref_name == 'upgrade-2020-weekly'
+        if: ${{ startsWith(github.ref_name, 'upgrade-') }}
         uses: docker/build-push-action@v6
         with:
           context: .
