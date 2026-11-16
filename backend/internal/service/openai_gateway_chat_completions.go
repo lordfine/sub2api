@@ -131,6 +131,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
+	// Responses-only 账号不接受 chat 入站：这里的请求会被重新拼装成 Responses，
+	// 上游看到的不是客户端原生请求体。排在 codex_cli_only 之后，非官方客户端仍先拿到 403。
+	if err := rejectNonResponsesInboundForCodexAccount(c, account, false); err != nil {
+		return nil, err
+	}
 
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
