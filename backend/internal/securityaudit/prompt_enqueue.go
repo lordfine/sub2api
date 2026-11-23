@@ -37,9 +37,9 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 		return nil
 	}
 	if len(cfg.EnabledEndpoints()) == 0 {
-		e.recordDropped()
-		LogWarn(EventEnqueueDropped, mergeLogFields(baseFields, map[string]any{"status": "dropped", "error_code": "no_enabled_endpoint"}))
-		return nil
+		// [audit-only patch] 零扫描端点不再丢弃：照常入队，worker 以 audit-only 模式记录事件
+		// (2026-09-21) 预期路径降为 Info 专用事件：audit-only 留档模式下每天 ~7000 条，warn 语义误导
+		LogInfo(EventAuditOnlyEnqueued, mergeLogFields(baseFields, map[string]any{"status": "audit_only_enqueued", "error_code": "no_enabled_endpoint"}))
 	}
 	snapshot, err := ExtractPromptSnapshot(req)
 	if errors.Is(err, ErrNoPromptText) {

@@ -34,7 +34,7 @@ func TestMCPToolCatalogTargetsRegisteredManagementRoutes(t *testing.T) {
 	v1 := router.Group("/api/v1")
 	h := mcpRouteHandlers()
 	require.NotPanics(t, func() {
-		RegisterUserRoutes(v1, h, middleware.JWTAuthMiddleware(mcpRouteNext), middleware.AuditLogMiddleware(mcpRouteNext), nil, nil)
+		RegisterUserRoutes(v1, h, middleware.JWTAuthMiddleware(mcpRouteNext), middleware.APIKeyAuthMiddleware(mcpRouteNext), middleware.AuditLogMiddleware(mcpRouteNext), nil, nil)
 		RegisterAdminRoutes(v1, h, middleware.AdminAuthMiddleware(mcpRouteNext), middleware.AuditLogMiddleware(mcpRouteNext), middleware.StepUpAuthMiddleware(mcpRouteNext), nil, nil)
 	})
 	registered := map[string]bool{}
@@ -71,7 +71,10 @@ func (a mcpRouteTokenAuth) Authenticate(context.Context, string) (*service.MCPPr
 func newMCPRouteTestEndpoint(h *handler.Handlers, principal *service.MCPPrincipal, settings *service.SettingService, audit middleware.AuditLogMiddleware) *gin.Engine {
 	inner := gin.New()
 	v1 := inner.Group("/api/v1")
-	RegisterUserRoutes(v1, h, middleware.JWTAuthMiddleware(managementmcp.DispatchAuth(false)), audit, settings, nil)
+	RegisterUserRoutes(v1, h,
+		middleware.JWTAuthMiddleware(managementmcp.DispatchAuth(false)),
+		middleware.APIKeyAuthMiddleware(managementmcp.DispatchAuth(false)),
+		audit, settings, nil)
 	RegisterAdminRoutes(v1, h, middleware.AdminAuthMiddleware(managementmcp.DispatchAuth(true)), audit, middleware.StepUpAuthMiddleware(mcpRouteNext), settings, nil)
 	outer := gin.New()
 	outer.POST("/api/v1/mcp", managementmcp.Authenticate(mcpRouteTokenAuth{principal: principal}, nil, h.MCPOAuth.ResourceURL), gin.WrapH(managementmcp.NewHandler(inner, nil)))

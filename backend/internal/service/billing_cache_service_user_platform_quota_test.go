@@ -47,14 +47,20 @@ func TestIncrementUserPlatformQuotaUsage_SyncCallsCache(t *testing.T) {
 	s.IncrementUserPlatformQuotaUsage(101, "anthropic", 0.25)
 	s.IncrementUserPlatformQuotaUsage(101, "openai", 0.50)
 
-	if len(fake.calls) != 2 {
-		t.Fatalf("expected 2 incr calls, got %d", len(fake.calls))
+	if len(fake.calls) != 4 {
+		t.Fatalf("expected 4 incr calls, got %d", len(fake.calls))
 	}
 	if fake.calls[0] != (incrCall{userID: 101, platform: "anthropic", cost: 0.25, ttl: 120 * time.Second, markDirty: false}) {
 		t.Errorf("call[0] = %+v", fake.calls[0])
 	}
-	if fake.calls[1] != (incrCall{userID: 101, platform: "openai", cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+	if fake.calls[1] != (incrCall{userID: 101, platform: userWeeklyQuotaCachePlatform, cost: 0.25, ttl: 120 * time.Second, markDirty: false}) {
 		t.Errorf("call[1] = %+v", fake.calls[1])
+	}
+	if fake.calls[2] != (incrCall{userID: 101, platform: "openai", cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+		t.Errorf("call[2] = %+v", fake.calls[2])
+	}
+	if fake.calls[3] != (incrCall{userID: 101, platform: userWeeklyQuotaCachePlatform, cost: 0.50, ttl: 120 * time.Second, markDirty: false}) {
+		t.Errorf("call[3] = %+v", fake.calls[3])
 	}
 }
 
@@ -136,11 +142,15 @@ func (f *fakeFullCache) getLastSetTTL() time.Duration {
 	return f.lastSetTTL
 }
 
-func (f *fakeFullCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, _ string) (*UserPlatformQuotaCacheEntry, bool, error) {
+func (f *fakeFullCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, platform string) (*UserPlatformQuotaCacheEntry, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.getErr != nil {
 		return nil, false, f.getErr
+	}
+	// 用户总周额度使用独立的 Redis 键，不能复用本测试替身的分平台 entry。
+	if platform == userWeeklyQuotaCachePlatform {
+		return nil, false, nil
 	}
 	if f.entry == nil {
 		return nil, false, nil

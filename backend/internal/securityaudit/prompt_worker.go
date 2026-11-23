@@ -175,7 +175,10 @@ func (r *Runner) processJob(ctx context.Context, workerID int, cfg ActiveConfig,
 	job.Snapshot.FullPrompt = FullPromptFromScanText(scanText)
 	endpoints := cfg.EnabledEndpoints()
 	if len(endpoints) == 0 {
-		return r.finishFailure(ctx, job, &GuardError{Code: "no_enabled_endpoint", Retryable: true})
+		// [audit-only patch] 没有扫描端点时仍完整记录审计事件，只跳过内容扫描
+		// (2026-09-21) 预期路径降为 Info 专用事件：audit-only 留档模式下每天 ~7000 条，warn 语义误导
+		LogInfo(EventAuditOnlySkipped, mergeLogFields(baseFields, map[string]any{"error_code": "no_enabled_endpoint", "status": "audit_only"}))
+		return r.completeAuditOnly(ctx, job, "no_enabled_endpoint")
 	}
 	chunks := SplitRunes(scanText, minimumInputLimit(endpoints))
 	results := make([]*NormalizedResult, 0, len(chunks))
@@ -262,6 +265,33 @@ func decisionKindForResult(result *NormalizedResult) DecisionKind {
 	}
 }
 
+// [audit-only patch] 记录与扫描解绑：不依赖扫描结果，直接以 pass/low/allow 落审计事件。
+// reason 写入 ScannerBackend 以便在事件详情中区分"未经扫描"的记录。
+func (r *Runner) completeAuditOnly(ctx context.Context, job *Job, reason string) error {
+	latency := 0
+	if job.ProcessingStartedAt != nil {
+		latency = int(r.clock.Now().Sub(*job.ProcessingStartedAt).Milliseconds())
+	}
+	fallback := &NormalizedResult{
+		Decision: EventPass, RiskLevel: RiskLow, Action: ActionAllow,
+		Safety:         "Unknown",
+		ScannerBackend: "audit-only:" + reason,
+		ScannerVersion: "no-scanner",
+		Categories:     []string{}, MatchedScanners: []string{},
+		ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{},
+		PolicyID: "priority", PolicyVersion: 1,
+		ChunkTotal: 0, LatencyMS: latency,
+	}
+	if _, err := r.repo.Complete(ctx, job, fallback, true); err != nil {
+		return err
+	}
+	if deleteErr := r.payload.Delete(ctx, job.ID); deleteErr != nil {
+		LogWarn(EventProcessFailed, map[string]any{"error_code": "payload_delete_failed", "status": "audit_only"})
+	}
+	LogInfo(EventProcessed, mergeLogFields(jobLogFields(job), map[string]any{"scanner_backend": fallback.ScannerBackend, "status": "done"}))
+	return nil
+}
+
 func (r *Runner) finishFailure(ctx context.Context, job *Job, err error) error {
 	baseFields := jobLogFields(job)
 	code := guardErrorCode(err)
@@ -277,11 +307,23 @@ func (r *Runner) finishFailure(ctx context.Context, job *Job, err error) error {
 		}
 		LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "retry", "error_code": code, "retryable": true}))
 	} else {
-		if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
-			return updateErr
+		// [audit-only patch] 终态失败不再丢弃全文：以 audit-only 事件保留记录，job 按完成终态处理
+		if job.Snapshot.FullPrompt != "" {
+			if completeErr := r.completeAuditOnly(ctx, job, code); completeErr != nil {
+				LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"error_code": "audit_only_complete_failed", "status": "fallback_fail"}))
+				if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
+					return updateErr
+				}
+				_ = r.payload.Delete(ctx, job.ID)
+			}
+			LogWarn(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed_recorded", "error_code": code, "retryable": false}))
+		} else {
+			if updateErr := r.repo.Fail(ctx, job.ID, job.ClaimVersion, code, "prompt guard processing failed"); updateErr != nil {
+				return updateErr
+			}
+			_ = r.payload.Delete(ctx, job.ID)
+			LogError(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed", "error_code": code, "retryable": false}))
 		}
-		_ = r.payload.Delete(ctx, job.ID)
-		LogError(EventProcessFailed, mergeLogFields(baseFields, map[string]any{"attempts": job.Attempts, "max_attempts": job.MaxAttempts, "status": "failed", "error_code": code, "retryable": false}))
 	}
 	r.setLastError(code, err.Error())
 	return err

@@ -99,6 +99,13 @@
             {{ t('admin.users.platformQuota.clearAll') }}
           </button>
         </div>
+
+      <div v-if="!loading" class="rounded-lg border border-cyan-200 bg-cyan-50 p-3 dark:border-cyan-500/30 dark:bg-cyan-500/10">
+        <label class="block text-sm font-medium text-cyan-900 dark:text-cyan-100">用户级自然周总额度（美元）</label>
+        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">所有平台的消费合并计算；留空为无限制，周一 00:00 自动重置。</p>
+        <input v-model.number="userWeeklyLimit" type="number" min="0" step="0.01" class="input mt-2 w-32" placeholder="无限制" />
+        <p class="mt-1 text-xs text-cyan-700 dark:text-cyan-200">已用 {{ formatUsage(userWeeklyUsage) }}，下次 {{ userWeeklyResetsAt || '-' }} 重置</p>
+      </div>
       </div>
     </div>
     <template #footer>
@@ -159,6 +166,9 @@ function configuredPlatforms(items: PlatformQuotaItem[]): Set<PlatformQuotaPlatf
   }
   return out
 }
+const userWeeklyLimit = ref<number | null>(null)
+const userWeeklyUsage = ref(0)
+const userWeeklyResetsAt = ref<string | null>(null)
 
 function emptyRow(p: PlatformQuotaPlatform): QuotaRow {
   return {
@@ -202,6 +212,9 @@ async function load() {
     const data = await adminAPI.users.getPlatformQuotas(props.user.id)
     quotas.value = normalize(data.platform_quotas || [])
     savedConfigured.value = configuredPlatforms(data.platform_quotas || [])
+    userWeeklyLimit.value = data.user_weekly_quota?.weekly_limit_usd ?? null
+    userWeeklyUsage.value = data.user_weekly_quota?.weekly_usage_usd ?? 0
+    userWeeklyResetsAt.value = data.user_weekly_quota?.weekly_resets_at ?? null
   } catch {
     appStore.showError(t('admin.users.platformQuota.loadFailed'))
     quotas.value = platformQuotaPlatforms().map(emptyRow)
@@ -226,6 +239,7 @@ function onClearAll() {
     row.weekly_limit_usd = null
     row.monthly_limit_usd = null
   }
+  userWeeklyLimit.value = null
 }
 
 async function onSave() {
@@ -245,6 +259,11 @@ async function onSave() {
     return
   }
 
+  if (typeof userWeeklyLimit.value === 'number' && (!Number.isFinite(userWeeklyLimit.value) || userWeeklyLimit.value < 0)) {
+    appStore.showError('用户级周额度必须是大于等于 0 的有效数字')
+    return
+  }
+
   submitting.value = true
   try {
     const payload = quotas.value.map((r) => ({
@@ -254,6 +273,7 @@ async function onSave() {
       monthly_limit_usd: normalizeLimit(r.monthly_limit_usd),
     }))
     await adminAPI.users.updatePlatformQuotas(props.user.id, payload)
+    await adminAPI.users.updateUserWeeklyQuota(props.user.id, normalizeLimit(userWeeklyLimit.value))
     appStore.showSuccess(t('admin.users.platformQuota.updateSuccess'))
     emit('success')
     emit('close')
