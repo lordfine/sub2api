@@ -1734,10 +1734,9 @@ func TestEnsureBudgetWithinMaxTokens(t *testing.T) {
 			checkBudget: 30976,
 		},
 		{
-			name:        "max_tokens 太小(1024)，升 max_tokens",
+			name:        "max_tokens 太小(1024)，不放大输出上限，交给上游报错",
 			input:       `{"thinking":{"budget_tokens":32768},"max_tokens":1024}`,
-			wantApplied: true,
-			checkMaxTok: 33792,
+			wantApplied: false,
 		},
 	}
 	for _, tt := range tests {
