@@ -122,11 +122,9 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 		LogInfo(EventEnqueueSkipped, mergeLogFields(requestLogFields(req), map[string]any{"config_version": cfg.ConfigVersion, "status": "skipped", "error_code": "group_out_of_scope"}))
 		return nil
 	}
-	if len(cfg.EnabledEndpoints()) == 0 {
-		s.enqueuer.recordDropped()
-		LogWarn(EventEnqueueDropped, mergeLogFields(requestLogFields(req), map[string]any{"config_version": cfg.ConfigVersion, "status": "dropped", "error_code": "no_enabled_endpoint"}))
-		return nil
-	}
+	// [audit-only patch] 零扫描端点不再丢弃：与 Enqueuer.Enqueue 保持一致，照常入队，
+	// worker 以 audit-only 模式记录事件。上游 v0.2.24 在此处新增的入口检查会架空 09-21
+	// 的降噪补丁（请求在上层被丢，永远到不了下层 audit-only 路径），2026-11-23 补回。
 	select {
 	case s.enqueueSlots <- struct{}{}:
 	default:
