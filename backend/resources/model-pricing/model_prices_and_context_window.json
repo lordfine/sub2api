@@ -3284,9 +3284,9 @@
     "supported_output_modalities": [
       "text"
     ],
-    "input_cost_per_token": 1.2324929971988797e-06,
-    "output_cost_per_token": 4.3137254901960795e-06,
-    "cache_read_input_token_cost": 3.081232492997199e-07
+    "input_cost_per_token": 1.1111111111111111e-06,
+    "output_cost_per_token": 3.8888888888888888e-06,
+    "cache_read_input_token_cost": 2.7777777777777776e-07
   },
   "glm-5.3-flash": {
     "cache_creation_input_token_cost": 0.0,
@@ -3309,9 +3309,9 @@
     "supported_output_modalities": [
       "text"
     ],
-    "input_cost_per_token": 1.1204481792717087e-07,
-    "output_cost_per_token": 3.92156862745098e-07,
-    "cache_read_input_token_cost": 3.2212885154061626e-08
+    "input_cost_per_token": 1.1111111111111111e-07,
+    "output_cost_per_token": 3.8888888888888888e-07,
+    "cache_read_input_token_cost": 3.1944444444444444e-08
   },
   "gpt-3.5-turbo": {
     "input_cost_per_token": 5e-07,
@@ -7003,10 +7003,10 @@
     "supports_web_search": true
   },
   "vision-m3": {
-    "input_cost_per_token": 3e-07,
-    "output_cost_per_token": 1.2e-06,
+    "input_cost_per_token": 1.3888888888888888e-07,
+    "output_cost_per_token": 5.555555555555555e-07,
     "cache_creation_input_token_cost": 3.75e-07,
-    "cache_read_input_token_cost": 6e-08,
+    "cache_read_input_token_cost": 1.3888888888888888e-08,
     "litellm_provider": "minimax",
     "max_input_tokens": 131072,
     "max_output_tokens": 131072,
