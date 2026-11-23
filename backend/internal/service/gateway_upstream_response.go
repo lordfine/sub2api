@@ -233,11 +233,9 @@ func (s *GatewayService) shouldFailoverOn400(respBody []byte) bool {
 		return true
 	}
 
-	// 火山云 coding 端点兼容性 400（专属文案，Anthropic 官方不会返回，不误伤）
-	if strings.Contains(msg, "error when parsing") || strings.Contains(msg, "do not support image") || strings.Contains(msg, "only support text input") {
-		return true
-	}
-
+	// 2026-11-23 用户决定：火山 coding 端点「解析失败 / 不支持图片 / 只支持文本」
+	// 这类 400 属于请求本身与目标模型不兼容，不再切账户重试，直接把上游报错
+	// 返回给客户端，让调用方知道要换模型或改请求。
 	return false
 }
 
