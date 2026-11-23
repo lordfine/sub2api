@@ -68,8 +68,29 @@ func TestBuildFullPromptStripsNULAndTruncates(t *testing.T) {
 	require.Equal(t, "abcd", BuildFullPrompt("ab\x00cd", 0))
 	long := strings.Repeat("长", DefaultFullPromptMaxRunes+10)
 	trimmed := BuildFullPrompt(long, DefaultFullPromptMaxRunes)
-	require.Equal(t, DefaultFullPromptMaxRunes+1, utf8.RuneCountInString(trimmed))
+	require.LessOrEqual(t, len(trimmed), DefaultFullPromptMaxBytes)
+	require.Greater(t, utf8.RuneCountInString(trimmed), 5000)
 	require.True(t, strings.HasSuffix(trimmed, "…"))
+}
+
+func TestBuildFullPromptCapsUTF8BytesRegardlessOfLanguage(t *testing.T) {
+	// ASCII text longer than the byte cap is truncated at the cap.
+	ascii := strings.Repeat("a", DefaultFullPromptMaxBytes+100)
+	out := BuildFullPrompt(ascii, DefaultFullPromptMaxRunes)
+	require.LessOrEqual(t, len(out), DefaultFullPromptMaxBytes)
+	require.True(t, strings.HasSuffix(out, "…"))
+
+	// A mixed CJK prompt that fits the rune cap must still respect the byte cap
+	// and keep valid UTF-8 (no split multi-byte sequence).
+	mixed := strings.Repeat("长", DefaultFullPromptMaxBytes/3+50)
+	out = BuildFullPrompt(mixed, DefaultFullPromptMaxRunes)
+	require.LessOrEqual(t, len(out), DefaultFullPromptMaxBytes)
+	require.True(t, utf8.ValidString(out))
+	require.True(t, strings.HasSuffix(out, "…"))
+
+	// Short prompts are untouched.
+	short := "短提示 " + strings.Repeat("字", 100)
+	require.Equal(t, short, BuildFullPrompt(short, DefaultFullPromptMaxRunes))
 }
 
 func TestFullPromptFromScanTextRestoresMultiSegmentLayout(t *testing.T) {

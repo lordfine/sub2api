@@ -80,6 +80,13 @@ const DefaultPromptPreviewMaxRunes = 96
 // prompts are kept intact while bounding per-row storage.
 const DefaultFullPromptMaxRunes = 65536
 
+// DefaultFullPromptMaxBytes caps the persisted full prompt by UTF-8 byte length.
+// The rune cap alone does not bound storage: one CJK rune is three bytes, so a
+// 65536-rune prompt could occupy ~190KB of PostgreSQL TOAST. Audit rows averaged
+// ~46KB before this cap and the TOAST reached 6GB; capping at 16KB keeps roughly
+// forty days of history inside a 10GB budget regardless of language mix.
+const DefaultFullPromptMaxBytes = 16 * 1024
+
 func extractProtocolSegments(protocol string, document any) []promptSegment {
 	root, _ := document.(map[string]any)
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
@@ -705,13 +712,38 @@ func BuildPromptPreview(value string, maxRunes int) string {
 
 // BuildFullPrompt returns the complete prompt text for audit-event storage and
 // admin review, without redaction. NUL bytes are stripped because PostgreSQL
-// TEXT rejects them, and the result is capped at maxRunes.
+// TEXT rejects them, and the result is capped first at maxRunes and then at
+// DefaultFullPromptMaxBytes so storage stays predictable for CJK text.
 func BuildFullPrompt(value string, maxRunes int) string {
 	if maxRunes <= 0 {
 		maxRunes = DefaultFullPromptMaxRunes
 	}
 	value = strings.ReplaceAll(value, "\x00", "")
-	return TrimRunes(strings.TrimSpace(value), maxRunes)
+	value = TrimRunes(strings.TrimSpace(value), maxRunes)
+	return TrimBytes(value, DefaultFullPromptMaxBytes)
+}
+
+// TrimBytes truncates value to at most limit bytes without splitting a UTF-8
+// sequence, appending an ellipsis only when something was dropped.
+func TrimBytes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	suffix := "…"
+	if len(value) <= limit {
+		return value
+	}
+	cut := limit - len(suffix)
+	if cut < 0 {
+		cut = 0
+	}
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	if cut == 0 {
+		return suffix
+	}
+	return value[:cut] + suffix
 }
 
 // FullPromptFromScanText reconstructs the display prompt from the worker scan
